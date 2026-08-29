@@ -295,6 +295,9 @@ select:focus, input:focus { border-color:var(--primary); box-shadow:0 0 0 3px rg
           <select id="f_core"><option value="">--</option><option value="是">是</option><option value="否">否</option></select>
         </div>
         <div class="form-group"><label>候选人姓名 *</label><input type="text" id="f_name"></div>
+        <div class="form-group"><label>学历</label>
+          <select id="f_education"><option value="">--</option><option value="本科">本科</option><option value="硕士">硕士</option><option value="博士">博士</option><option value="大专">大专</option><option value="其他">其他</option></select>
+        </div>
         <div class="form-group"><label>联系方式</label><input type="text" id="f_phone"></div>
         <div class="form-group"><label>面试日期</label><input type="date" id="f_interview_date"></div>
         <div class="form-group"><label>简历来源</label>
@@ -316,7 +319,6 @@ select:focus, input:focus { border-color:var(--primary); box-shadow:0 0 0 3px rg
         <div class="form-group"><label>拒offer原因</label>
           <select id="f_reject_reason"><option value="">--</option><option value="薪酬">薪酬</option><option value="距离">距离</option><option value="工作时间">工作时间</option><option value="职业规划">职业规划</option><option value="有更好选择">有更好选择</option></select>
         </div>
-        <div class="form-group"><label>备注</label><input type="text" id="f_note"></div>
       </div>
       <button class="btn btn-success" id="btnSave" onclick="saveEntry()">✅ 保存记录</button>
       <button class="btn btn-sm" id="btnCancelEdit" style="margin-left:8px;display:none;background:#eee;color:#666;border:1px solid #ccc;" onclick="cancelEdit()">取消编辑</button>
@@ -2103,7 +2105,7 @@ async function saveEntry() {
     first: f('f_first'), second: f('f_second'),
     offer: f('f_offer'), rejectReason: f('f_reject_reason'),
     hireDate: f('f_hire_date') || null,
-    note: f('f_note')
+    education: f('f_education')
   };
 
   if (editingId) {
@@ -2159,7 +2161,7 @@ function editRecord(id) {
   setVal('f_source', r.source); setVal('f_first', r.first);
   setVal('f_second', r.second); setVal('f_offer', r.offer);
   setVal('f_hire_date', r.hireDate); setVal('f_reject_reason', r.rejectReason);
-  setVal('f_note', r.note);
+  setVal('f_education', r.education);
 
   // Update UI to edit mode
   document.getElementById('formTitle').textContent = '✏️ 编辑招聘记录';
@@ -2187,7 +2189,7 @@ function clearForm() {
   editingId = null;
   ['f_team','f_date','f_follower','f_dept','f_position','f_category','f_core',
    'f_name','f_phone','f_interview_date','f_result','f_source','f_first',
-   'f_second','f_offer','f_hire_date','f_reject_reason','f_note'].forEach(id => {
+   'f_second','f_offer','f_hire_date','f_reject_reason','f_education'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
