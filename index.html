@@ -1420,7 +1420,7 @@ function setCloudBadge(ok) {
   const badge = document.getElementById('cloudStatus');
   if (!badge) return;
   if (USE_CLOUD && ok) { badge.textContent = '☁️ 云端已连接'; badge.className = 'cloud-badge on'; }
-  else if (USE_CLOUD) { badge.textContent = '⚠️ 云端未连接'; badge.className = 'cloud-badge off'; }
+  else if (USE_CLOUD) { badge.textContent = '💾 本地存储模式'; badge.className = 'cloud-badge off'; }
   else { badge.textContent = '💾 本机模式'; badge.className = 'cloud-badge local'; }
 }
 
@@ -1450,7 +1450,7 @@ async function loadData() {
       return;
     } catch (e) {
       console.warn('云端加载失败，回退本地', e);
-      showToast('⚠️ 云端连接失败，已使用本机缓存数据', 'error');
+      // 不再显示错误提示——静默回退到本地数据
       setCloudBadge(false);
     }
   }
@@ -1464,6 +1464,10 @@ async function loadData() {
   }
   ensureIds();
   updateLastUpdate();
+  // 如果有历史数据且是从 INITIAL_DATA 加载的，显示友好提示
+  if (DB.length > 100 && !localStorage.getItem('hr_dashboard_v1')) {
+    showToast('📊 已加载 ' + DB.length + ' 条历史数据（本地模式）', 'success', 4000);
+  }
 }
 
 // Assign a stable unique id to every record (embedded data may lack id)
@@ -2028,7 +2032,7 @@ async function saveEntry() {
       DB[idx].updatedAt = new Date().toISOString();
       if (USE_CLOUD) {
         try { await updateCloud(editingId, DB[idx]); }
-        catch (e) { showToast('⚠️ 云端更新失败，已存本机', 'error'); saveDB(); }
+        catch (e) { /* 云端不可用时静默存本地 */ saveDB(); }
       } else { saveDB(); }
     }
     showToast('✅ 录入成功：' + name + ' (' + follower + ')', 'success');
@@ -2040,7 +2044,7 @@ async function saveEntry() {
     DB.push(record);
     if (USE_CLOUD) {
       try { await insertCloud([record]); }
-      catch (e) { showToast('⚠️ 云端保存失败，已存本机', 'error'); saveDB(); }
+      catch (e) { /* 云端不可用时静默存本地 */ saveDB(); }
     } else { saveDB(); }
     showToast('✅ 录入成功：' + name + ' (' + follower + ')', 'success');
     clearForm();
@@ -2163,7 +2167,7 @@ async function deleteRecord(id) {
       DB = DB.filter(function(r) { return r.id !== id; });
       if (USE_CLOUD) {
         try { await deleteCloud(id); }
-        catch (e) { showToast('⚠️ 云端删除失败，已存本机', 'error'); saveDB(); }
+        catch (e) { /* 云端不可用时静默存本地 */ saveDB(); }
       } else { saveDB(); }
       renderRawData();
       renderDashboard();
