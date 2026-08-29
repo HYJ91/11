@@ -1384,6 +1384,7 @@ const SUPABASE_URL = 'https://fipoedqsmmehwedxjfbe.supabase.co';          // 例
 const SUPABASE_ANON_KEY = 'sb_publishable_y5qPdY7oF346SbWZQ5JQGA_bV21jKon';     // 项目 API 设置里的 anon public key
 const TABLE = 'recruit_records';
 const USE_CLOUD = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+const USE_LOCAL_API = false;   // 本地服务器模式（server.js 启动时会注入为 true）
 
 // 纯 fetch 调用 Supabase REST（不依赖任何 CDN，HTML 自包含）
 async function supaFetch(method, query, body) {
@@ -1400,17 +1401,36 @@ async function supaFetch(method, query, body) {
 }
 // 每行 {id, payload, created_at, updated_at} -> 还原为记录对象
 async function loadCloud() {
+  if (USE_LOCAL_API) {
+    const r = await fetch('/api/data');
+    const j = await r.json();
+    return j.records || [];
+  }
   const rows = await supaFetch('GET', 'select=id,payload&order=created_at.asc');
   return (rows || []).map(r => Object.assign({}, r.payload, { id: (r.payload && r.payload.id) || r.id }));
 }
 async function insertCloud(records) {
+  if (USE_LOCAL_API) {
+    for (const rec of records) {
+      await fetch('/api/record', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rec) });
+    }
+    return;
+  }
   const payloads = records.map(r => ({ id: r.id, payload: r }));
   await supaFetch('POST', '', payloads);
 }
 async function updateCloud(id, record) {
+  if (USE_LOCAL_API) {
+    await fetch('/api/record/' + encodeURIComponent(id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) });
+    return;
+  }
   await supaFetch('PATCH', 'id=eq.' + encodeURIComponent(id), { payload: record });
 }
 async function deleteCloud(id) {
+  if (USE_LOCAL_API) {
+    await fetch('/api/record/' + encodeURIComponent(id), { method: 'DELETE' });
+    return;
+  }
   await supaFetch('DELETE', 'id=eq.' + encodeURIComponent(id));
 }
 function genId() {
@@ -1419,7 +1439,9 @@ function genId() {
 function setCloudBadge(ok) {
   const badge = document.getElementById('cloudStatus');
   if (!badge) return;
-  if (USE_CLOUD && ok) { badge.textContent = '☁️ 云端已连接'; badge.className = 'cloud-badge on'; }
+  if (USE_LOCAL_API && ok) { badge.textContent = '🖥️ 本地服务器已连接'; badge.className = 'cloud-badge on'; }
+  else if (USE_LOCAL_API) { badge.textContent = '🖥️ 本地服务器(离线)'; badge.className = 'cloud-badge off'; }
+  else if (USE_CLOUD && ok) { badge.textContent = '☁️ 云端已连接'; badge.className = 'cloud-badge on'; }
   else if (USE_CLOUD) { badge.textContent = '💾 本地存储模式'; badge.className = 'cloud-badge off'; }
   else { badge.textContent = '💾 本机模式'; badge.className = 'cloud-badge local'; }
 }
@@ -1441,6 +1463,22 @@ function loadTeamsLocal() {
 // Load from localStorage, or import initial data on first use
 async function loadData() {
   loadTeamsLocal();
+  if (USE_LOCAL_API) {
+    try {
+      DB = await loadCloud();
+      ensureIds();
+      updateLastUpdate();
+      setCloudBadge(true);
+      return;
+    } catch (e) {
+      console.warn('本地服务器加载失败，回退本地缓存', e);
+      setCloudBadge(false);
+      // 本地模式不 fallback 到 Supabase（避免用云端旧数据覆盖）
+      try { const raw = localStorage.getItem('hr_dashboard_v1'); if (raw) { DB = JSON.parse(raw); } } catch(e2) {}
+      if (DB.length === 0) { DB = (typeof INITIAL_DATA !== 'undefined' && INITIAL_DATA.length) ? INITIAL_DATA.slice() : []; }
+      return; // ← 关键：本地模式下到此为止，不再尝试 Supabase
+    }
+  }
   if (USE_CLOUD) {
     try {
       DB = await loadCloud();
@@ -1899,13 +1937,20 @@ function initAutocomplete(inputId, listId, options) {
   const list = document.getElementById(listId);
   let activeIdx = -1;
 
-  input.addEventListener('focus', function() { showAc(input, list, options, ''); this.classList.remove('invalid-input'); });
-  input.addEventListener('input', function() { showAc(input, list, options, this.value); activeIdx = -1; this.classList.remove('invalid-input'); });
+  function getEffectiveOptions() {
+    // 岗位下拉使用动态过滤后的选项
+    if (inputId === 'f_position' && currentPositionOptions) return currentPositionOptions;
+    return options;
+  }
+
+  input.addEventListener('focus', function() { showAc(input, list, getEffectiveOptions(), ''); this.classList.remove('invalid-input'); });
+  input.addEventListener('input', function() { showAc(input, list, getEffectiveOptions(), this.value); activeIdx = -1; this.classList.remove('invalid-input'); });
   input.addEventListener('blur', function() {
     // 延迟检查，让 click 事件先执行（否则点击列表项时值还没更新就校验了）
     setTimeout(() => {
       const v = this.value.trim();
-      if (v && !options.includes(v)) {
+      const effOpts = getEffectiveOptions();
+      if (v && !effOpts.includes(v)) {
         this.classList.add('invalid-input');
         showToast('⚠️ 「' + v + '」不在标准列表中，请从下拉选择或清空', 'error');
       } else {
@@ -1928,8 +1973,11 @@ function initAutocomplete(inputId, listId, options) {
 }
 
 function showAc(input, list, options, query) {
+  // 对岗位下拉，优先使用当前动态选项（部门联动过滤后的）
+  const effectiveOpts = (input.id === 'f_position' && currentPositionOptions)
+    ? currentPositionOptions : options;
   const q = query.toLowerCase().trim();
-  const filtered = q ? options.filter(o => o.toLowerCase().includes(q)) : options;
+  const filtered = q ? effectiveOpts.filter(o => o.toLowerCase().includes(q)) : effectiveOpts;
   if (!filtered.length) { list.classList.remove('show'); return; }
   list.innerHTML = filtered.map(o => `<li data-val="${o}">${o}</li>`).join('');
   list.classList.add('show');
@@ -1950,6 +1998,43 @@ function highlightAc(items) {
 }
 
 // 选定部门+岗位后，自动识别【是否核心】与【人员类别(职员/员工/暑假工)】
+let currentPositionOptions = STANDARD_POSITIONS.slice();
+
+function updatePositionOptions(dept) {
+  const posInput = document.getElementById('f_position');
+  if (!posInput) return;
+
+  let positions = [];
+  if (dept) {
+    // 从 DEPT_POS_MAP 提取该部门下的岗位
+    const prefix = dept + '||';
+    positions = Object.keys(DEPT_POS_MAP)
+      .filter(k => k.startsWith(prefix))
+      .map(k => k.slice(prefix.length));
+    // 研发中心特殊处理：匹配所有研发子部门
+    if (dept === '研发中心') {
+      const rdPositions = Object.keys(DEPT_POS_MAP)
+        .filter(k => k.includes('研发中心') || k.includes('研发'))
+        .map(k => k.split('||')[1]);
+      positions = [...new Set([...positions, ...rdPositions])];
+    }
+  }
+  // 兜底：如果没找到映射，显示全部岗位（兼容新增部门/岗位）
+  if (!positions.length) {
+    positions = STANDARD_POSITIONS.slice();
+  }
+  positions.sort();
+
+  // 如果当前岗位值不在新列表中，清空岗位输入（但保留编辑已有记录时的值）
+  const curPos = posInput.value.trim();
+  if (curPos && !positions.includes(curPos) && !editingId) {
+    posInput.value = '';
+  }
+
+  // 更新全局选项变量（showAc 会读取这个）
+  currentPositionOptions = positions;
+}
+
 function applyAutoRecognition() {
   const d = (document.getElementById('f_dept').value || '').trim();
   const p = (document.getElementById('f_position').value || '').trim();
@@ -2064,6 +2149,8 @@ function editRecord(id) {
 
   setVal('f_team', r.team); setVal('f_date', r.date); setVal('f_follower', r.follower);
   setVal('f_dept', r.dept); setVal('f_position', r.position);
+  // 同步岗位下拉选项到当前部门
+  updatePositionOptions(r.dept || '');
   setVal('f_category', r.category); setVal('f_core', r.core);
   setVal('f_name', r.name); setVal('f_phone', r.phone);
   setVal('f_interview_date', r.interviewDate); setVal('f_result', r.result);
@@ -2133,7 +2220,17 @@ function renderRawData() {
   deptSel.innerHTML = '<option value="">全部部门</option>' + depts.map(d=>`<option value="${d}">${d}</option>`).join('');
   if (depts.includes(curVal)) deptSel.value = curVal;
 
-  data.sort((a,b) => new Date(b.date) - new Date(a.date));
+  data.sort((a, b) => {
+    const d = new Date(b.date) - new Date(a.date);
+    if (d !== 0) return d;
+    // 同一天内：有 createdAt 按 createdAt 倒排；无则按 id 倒排（新数据 id 更大）
+    const ca = a.createdAt ? new Date(a.createdAt) : 0;
+    const cb = b.createdAt ? new Date(b.createdAt) : 0;
+    if (ca && cb) return cb - ca;
+    if (ca) return -1; // a 有 createdAt 视为更新
+    if (cb) return 1;  // b 有 createdAt 视为更新
+    return (b.id || '').localeCompare(a.id || '');
+  });
 
   document.getElementById('rawCount').textContent = `共 ${data.length} 条`;
 
@@ -2341,6 +2438,7 @@ async function doImport() {
 
 // 云端实时同步：定时轮询，他人录入/修改后本机自动刷新
 let _cloudSig = '';
+let _localSig = '';
 function cloudSignature() {
   // 用 数量 + 每条关键字段快照长度 生成签名，能捕捉新增/删除/状态编辑
   let s = DB.length + '|';
@@ -2372,9 +2470,35 @@ async function cloudSyncTick() {
   }
 }
 function startCloudSync() {
+  if (USE_LOCAL_API) { startLocalSync(); return; } // 本地模式走本地服务器轮询
   if (!USE_CLOUD) return;
   _cloudSig = cloudSignature();
-  setInterval(cloudSyncTick, 15000); // 每 15 秒同步一次
+  setInterval(cloudSyncTick, 15000); // 每 15 秒同步一次（仅 Supabase 云端模式需要）
+}
+
+// 本地服务器模式：每 5 秒拉取最新全量数据，静默合并更新（不覆盖、不弹窗）
+async function startLocalSync() {
+  const tick = async () => {
+    try {
+      const res = await fetch('/api/data');
+      if (!res.ok) return;
+      const d = await res.json();
+      const records = d.records || [];
+      // 用 id 集合做签名，无变化则跳过（避免无谓重渲染）
+      const sig = records.map(r => r.id).sort().join('|');
+      if (sig !== _localSig) {
+        DB = records;
+        ensureIds();
+        _localSig = sig;
+        updateLastUpdate();
+        renderDashboard();
+        setCloudBadge(true);
+        console.log('[本地同步] 数据已更新，当前', DB.length, '条');
+      }
+    } catch (e) { /* 拉取失败静默重试 */ }
+  };
+  await tick();                 // 进入页面先同步一次
+  setInterval(tick, 5000);      // 之后每 5 秒
 }
 
 // INIT
@@ -2386,7 +2510,10 @@ function startCloudSync() {
   initAutocomplete('f_dept', 'list_dept', STANDARD_DEPTS);
   initAutocomplete('f_position', 'list_position', STANDARD_POSITIONS);
   // 选定部门/岗位后自动识别「是否核心」与「人员类别」
-  document.getElementById('f_dept').addEventListener('change', applyAutoRecognition);
+  document.getElementById('f_dept').addEventListener('change', function() {
+    updatePositionOptions(this.value.trim());
+    applyAutoRecognition();
+  });
   document.getElementById('f_position').addEventListener('change', applyAutoRecognition);
 })();
 </script>
