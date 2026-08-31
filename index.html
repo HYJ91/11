@@ -1479,6 +1479,26 @@ async function loadData() {
     try {
       DB = await loadCloud();
       ensureIds();
+      // ---- 自动恢复：把浏览器缓存中服务器缺失的记录补传回服务器 ----
+      try {
+        const rawCache = localStorage.getItem('hr_dashboard_v1');
+        if (rawCache) {
+          const cached = JSON.parse(rawCache);
+          if (Array.isArray(cached) && cached.length > 0) {
+            const have = new Set(DB.map(r => r.id));
+            const missing = cached.filter(r => r && r.id && !have.has(r.id));
+            if (missing.length > 0) {
+              try {
+                const resp = await fetch('/api/record', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(missing) });
+                if (resp.ok) {
+                  DB = DB.concat(missing);
+                  setTimeout(() => showToast('✅ 已自动恢复 ' + missing.length + ' 条未同步数据（来自本机缓存）', 'success', 6000), 800);
+                }
+              } catch (e3) { console.warn('自动恢复上传失败', e3); }
+            }
+          }
+        }
+      } catch (e2r) { console.warn('自动恢复检查失败', e2r); }
       updateLastUpdate();
       setCloudBadge(true);
       return;
