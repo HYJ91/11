@@ -1482,22 +1482,26 @@ async function loadData() {
       // ---- 自动恢复：把浏览器缓存中服务器缺失的记录补传回服务器 ----
       try {
         const rawCache = localStorage.getItem('hr_dashboard_v1');
-        if (rawCache) {
-          const cached = JSON.parse(rawCache);
-          if (Array.isArray(cached) && cached.length > 0) {
-            const have = new Set(DB.map(r => r.id));
-            const missing = cached.filter(r => r && r.id && !have.has(r.id));
-            if (missing.length > 0) {
-              try {
-                const resp = await fetch('/api/record', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(missing) });
-                if (resp.ok) {
-                  DB = DB.concat(missing);
-                  setTimeout(() => showToast('✅ 已自动恢复 ' + missing.length + ' 条未同步数据（来自本机缓存）', 'success', 6000), 800);
-                }
-              } catch (e3) { console.warn('自动恢复上传失败', e3); }
-            }
-          }
+        const cached = rawCache ? JSON.parse(rawCache) : [];
+        const _now = new Date();
+        const _today = _now.getFullYear() + '-' + String(_now.getMonth() + 1).padStart(2, '0') + '-' + String(_now.getDate()).padStart(2, '0');
+        const cacheKey = function(r) { return r.id || ('r' + Math.abs(hashStr((r.team || '') + '|' + (r.date || '') + '|' + (r.follower || '') + '|' + (r.name || '') + '|' + (r.position || ''))).toString(36)); };
+        const have = new Set(DB.map(cacheKey));
+        const missing = cached.filter(function(r) { return r && !have.has(cacheKey(r)); });
+        missing.forEach(function(r) { if (!r.id) r.id = cacheKey(r); });
+        const cacheToday = cached.filter(function(r) { return r && r.date === _today; }).length;
+        const srvToday = DB.filter(function(r) { return r && r.date === _today; }).length;
+        let msg = '同步诊断: 缓存' + cached.length + '条(今天' + cacheToday + ') / 服务器' + DB.length + '条(今天' + srvToday + ')';
+        if (missing.length > 0) {
+          try {
+            const resp = await fetch('/api/record', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(missing) });
+            if (resp.ok) {
+              DB = DB.concat(missing);
+              msg = '已自动恢复 ' + missing.length + ' 条未同步数据! ' + msg;
+            } else { msg += ' | 恢复上传失败(' + resp.status + ')'; }
+          } catch (e3) { msg += ' | 恢复上传失败'; console.warn('自动恢复上传失败', e3); }
         }
+        setTimeout(function() { showToast('[' + msg + ']', missing.length > 0 ? 'success' : 'info', 10000); }, 600);
       } catch (e2r) { console.warn('自动恢复检查失败', e2r); }
       updateLastUpdate();
       setCloudBadge(true);
