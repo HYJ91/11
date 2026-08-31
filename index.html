@@ -180,6 +180,7 @@ select:focus, input:focus { border-color:var(--primary); box-shadow:0 0 0 3px rg
 .cloud-badge.local { background:rgba(255,255,255,.15); }
 
 </style>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -381,7 +382,7 @@ select:focus, input:focus { border-color:var(--primary); box-shadow:0 0 0 3px rg
 </div>
 
 <!-- Hidden file input -->
-<input type="file" id="fileInput" accept=".json" style="display:none;" onchange="onFileImport(event)">
+<input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.json" style="display:none;" onchange="onFileImport(event)">
 
 <script>
 // ============================================================
@@ -2281,12 +2282,34 @@ async function deleteRecord(id) {
 // IMPORT / EXPORT
 // ============================================================
 function exportData() {
-  const json = JSON.stringify(DB, null, 2);
-  const blob = new Blob([json], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = `招聘大数据_${new Date().toISOString().slice(0,10)}.json`;
-  a.click(); URL.revokeObjectURL(url);
+  const COLS = [
+    { key: 'date',        header: '邀约日期' },
+    { key: 'follower',    header: '跟进人' },
+    { key: 'dept',        header: '应聘部门' },
+    { key: 'position',    header: '应聘岗位' },
+    { key: 'name',        header: '候选人姓名' },
+    { key: 'phone',       header: '联系方式' },
+    { key: 'education',   header: '学历' },
+    { key: 'interviewDate',header:'面试日期' },
+    { key: 'result',      header: '跟进结果' },
+    { key: 'source',      header: '简历来源' },
+    { key: 'first',       header: '初面' },
+    { key: 'reason',      header: '原因' },
+    { key: 'second',      header: '复面' },
+    { key: 'secondFeedback',header:'复面反馈' },
+    { key: 'offer',       header: 'offer确认' },
+    { key: 'rejectReason',header:'拒offer原因' },
+    { key: 'hireDate',    header: '入职时间' }
+  ];
+  const headers = COLS.map(c => c.header);
+  const rows = DB.map(r => COLS.map(c => r[c.key] || ''));
+  const wsData = [headers, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = COLS.map(c => ({ wch: Math.max(c.header.length * 2, 12) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '招聘数据');
+  const filename = `招聘大数据_${new Date().toISOString().slice(0,10)}.xlsx`;
+  XLSX.writeFile(wb, filename);
 }
 
 function importData() {
@@ -2296,29 +2319,64 @@ function importData() {
 async function onFileImport(event) {
   const file = event.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = async function(e) {
-    try {
-      const imported = JSON.parse(e.target.result);
-      if (Array.isArray(imported)) {
-        const newRecs = [];
-        imported.forEach(rec => {
-          if (!rec.id) rec.id = genId();
-          const exists = DB.some(r => r.id === rec.id) ||
-                        DB.some(r => r.name===rec.name && r.date===rec.date && r.follower===rec.follower);
-          if (!exists) { DB.push(rec); newRecs.push(rec); }
+  const ext = file.name.split('.').pop().toLowerCase();
+  let imported = [];
+
+  try {
+    if (ext === 'json') {
+      const text = await file.text();
+      imported = JSON.parse(text);
+      if (!Array.isArray(imported)) throw new Error('JSON 内容必须是数组');
+    } else {
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      if (raw.length < 2) throw new Error('Excel 数据至少需要表头 + 1 行数据');
+
+      const headerMap = {
+        '邀约日期':'date','跟进人':'follower','应聘部门':'dept','应聘岗位':'position',
+        '候选人姓名':'name','姓名':'name','联系方式':'phone','学历':'education',
+        '面试日期':'interviewDate','跟进结果':'result','简历来源':'source',
+        '初面':'first','原因':'reason','复面':'second','复面反馈':'secondFeedback',
+        'offer确认':'offer','拒offer原因':'rejectReason','入职时间':'hireDate',
+        '序号':'skip','人员类别':'category','是否核心':'core','是否入职':'isHired',
+        '录用部门':'hireDept','面试官':'interviewer','面试形式':'interviewType',
+        '面试情况':'feedback','事业群':'bg','备注':'note'
+      };
+      const headers = raw[0].map(h => String(h).trim());
+      const colKeys = headers.map(h => headerMap[h] || h);
+
+      for (let i = 1; i < raw.length; i++) {
+        const row = raw[i];
+        if (!row || row.every(c => c === undefined || c === null || String(c).trim() === '')) continue;
+        const rec = {};
+        colKeys.forEach((key, idx) => {
+          if (key && key !== 'skip') { rec[key] = row[idx] != null ? String(row[idx]).trim() : ''; }
         });
-        ensureIds();
-        if (USE_CLOUD && newRecs.length) {
-          try { await insertCloud(newRecs); }
-          catch(err) { showToast('⚠️ 云端导入失败，已存本机', 'error'); saveDB(); }
-        } else if (newRecs.length) { saveDB(); }
-        renderRawData();
-        showToast(`✅ 导入成功！现有 ${DB.length} 条记录`, 'success');
+        if (rec.name || rec.date) { imported.push(rec); }
       }
-    } catch(err) { alert('❌ 文件解析失败：' + err.message); }
-  };
-  reader.readAsText(file);
+    }
+
+    const newRecs = [];
+    imported.forEach(rec => {
+      if (!rec.id) rec.id = genId();
+      const exists = DB.some(r => r.id === rec.id) ||
+                    DB.some(r => r.name===rec.name && r.date===rec.date && r.follower===rec.follower);
+      if (!exists) { DB.push(rec); newRecs.push(rec); }
+    });
+
+    if (USE_LOCAL_API && newRecs.length) {
+      try { await fetch('/api/record', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(newRecs) }); }
+      catch(e) {}
+    } else if (newRecs.length) { saveDB(); }
+    renderRawData();
+    showToast(`✅ 导入成功！新增 ${newRecs.length} 条，现有 ${DB.length} 条记录`, 'success');
+  } catch(err) {
+    alert('❌ 文件解析失败：' + err.message);
+  }
+  event.target.value = '';
+}
   event.target.value = '';
 }
 
