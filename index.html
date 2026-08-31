@@ -1772,7 +1772,7 @@ function renderGroupSections(data, prevData){
     const members=TEAM_MEMBERS[t]||[];
     let recs=data.filter(r=>r.team===t);
 
-    // 研发组：岗位类型筛选（研发核心 / 所有岗位）
+    // 研发组：岗位类型筛选（研发岗位 / 研发核心岗位 / 所有岗位）
     const isYanfa = (t === '研发组');
     let yanfaFilterHtml = '';
     if (isYanfa) {
@@ -1780,18 +1780,24 @@ function renderGroupSections(data, prevData){
       yanfaFilterHtml = '<div style="margin-bottom:10px;display:flex;align-items:center;gap:8px;">'+
         '<label style="font-size:13px;font-weight:500;color:var(--text);">岗位类型筛选：</label>'+
         '<select id="yanfaPosFilter" onchange="renderDashboard()" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;">'+
-        '<option value="core"'+(pf==='core' || pf===''?' selected':'')+'>研发核心岗位</option>'+
+        '<option value="rd"'+(pf==='rd' || pf===''?' selected':'')+'>研发岗位</option>'+
+        '<option value="core"'+(pf==='core'?' selected':'')+'>研发核心岗位</option>'+
         '<option value="all"'+(pf==='all'?' selected':'')+'>所有岗位（研发+常规）</option></select>'+
         '</div>';
       if (pf === 'all') {
-        // 所有岗位：不过滤，显示研发组招的全部记录
-      } else {
-        // 默认 core：只保留研发核心岗位
+        // 所有岗位：不过滤，显示研发组招的全部记录（含非研发岗）
+      } else if (pf === 'core') {
+        // 研发核心岗位：只保留 DEPT_POS_MAP 标记为"是|职员"的
         recs = recs.filter(r => {
-          // 优先精确匹配 dept+pos，回退到按岗位名判断
           const v = DEPT_POS_MAP[(r.dept||'')+'||'+(r.position||'')];
           if (v) return v.split('|')[0] === '是';
           return !!(POSITION_CORE[r.position||'']);
+        });
+      } else {
+        // 默认 rd：研发中心下的所有岗位（含核心+非核心，排除行政/销售/采购等非研发部门）
+        recs = recs.filter(r => {
+          const d = (r.dept || '');
+          return d.includes('研发') || d === '研发中心';
         });
       }
     }
