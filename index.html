@@ -2282,30 +2282,43 @@ async function deleteRecord(id) {
 // IMPORT / EXPORT
 // ============================================================
 function exportData() {
+  // 严格按用户 Excel 模板的列顺序和表头
   const COLS = [
-    { key: 'date',        header: '邀约日期' },
-    { key: 'follower',    header: '跟进人' },
+    { key: 'year',        header: '年份',       fn: r => (r.date ? String(r.date).slice(0,4) : '') },
+    { key: 'name',        header: '候选人' },
+    { key: 'phone',       header: '联系方式' },
     { key: 'dept',        header: '应聘部门' },
     { key: 'position',    header: '应聘岗位' },
-    { key: 'name',        header: '候选人姓名' },
-    { key: 'phone',       header: '联系方式' },
+    { key: 'category',    header: '面试分类' },
     { key: 'education',   header: '学历' },
+    { key: 'name2',       header: '姓名',       fn: r => r.name || '' },
+    { key: 'phone2',      header: '联系方式',    fn: r => r.phone || '' },
+    { key: 'source',      header: '面试来源' },
+    { key: 'interviewType',header:'面试活动' },
+    { key: 'interviewer', header: '面试官' },
     { key: 'interviewDate',header:'面试日期' },
-    { key: 'result',      header: '跟进结果' },
-    { key: 'source',      header: '简历来源' },
-    { key: 'first',       header: '初面' },
-    { key: 'reason',      header: '原因' },
-    { key: 'second',      header: '复面' },
-    { key: 'secondFeedback',header:'复面反馈' },
+    { key: 'result',      header: '面试结果' },
+    { key: 'first',       header: '初试结果' },
+    { key: 'second',      header: '复试结果' },
+    { key: 'second2',     header: '复试',        fn: r => r.second || '' },
+    { key: 'secondFeedback',header:'给复试反馈' },
+    { key: 'reason',      header: '不通过原因' },
     { key: 'offer',       header: 'offer确认' },
     { key: 'rejectReason',header:'拒offer原因' },
-    { key: 'hireDate',    header: '入职时间' }
+    { key: 'hireDept',    header: '录用部门' },
+    { key: 'dept2',       header: '录用部门',    fn: r => r.dept || '' },
+    { key: 'hireDate',    header: '入职时间' },
+    { key: 'follower',    header: '录用人/跟进人' }
   ];
   const headers = COLS.map(c => c.header);
-  const rows = DB.map(r => COLS.map(c => r[c.key] || ''));
+  const rows = DB.map(r => COLS.map(c => c.fn ? c.fn(r) : (r[c.key] || '')));
   const wsData = [headers, ...rows];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = COLS.map(c => ({ wch: Math.max(c.header.length * 2, 12) }));
+  // 表头蓝色背景（匹配截图样式）
+  const headerFill = { fgColor: { rgb: "2F6FED" } };
+  ws['!cols'] = COLS.map(c => ({ wch: Math.max(c.header.length * 2 + 2, 10) }));
+  // 冻结首行
+  ws['!freeze'] = { xSplit: 0, ySplit: 1, topLeftCell: "A2" };
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '招聘数据');
   const filename = `招聘大数据_${new Date().toISOString().slice(0,10)}.xlsx`;
